@@ -1,0 +1,11 @@
+.env
+.venv/
+venv/
+.tmp/
+temp/
+__pycache__/
+*.py[cod]
+*.db
+*.db-shm
+*.db-wal
+queue_service.py
