@@ -9,3 +9,18 @@ __pycache__/
 *.db-shm
 *.db-wal
 queue_service.py
+
+# 사용자 음성 데이터 (PII)
+voice_data/
+
+# fine-tune 학습 산출물
+tuning/manifest_*/
+tuning/my_voice/
+tuning/runs/
+*.pth
+*.ckpt
+
+# IDE
+.vscode/
+.idea/
+.DS_Store

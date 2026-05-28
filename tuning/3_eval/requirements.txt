@@ -1,0 +1,5 @@
+coqui-tts>=0.24.3
+openai-whisper>=20231117
+torch>=2.0
+soundfile
+librosa
