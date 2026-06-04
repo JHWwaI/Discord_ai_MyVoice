@@ -1,124 +1,76 @@
-<div align="center">
+# VoiceBridge — Discord AI 음성봇 (내 목소리 TTS)
 
-# VoiceBridge
+> **Discord 음성 채널에서 슬래시 커맨드로 입력한 텍스트를, Edge TTS 또는 XTTS v2로 클로닝한 '내 목소리'로 합성·재생하는 Python 음성봇 — 무료 Kaggle GPU로 개인 음성 클로닝 파이프라인까지 구축**
 
-[![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)](.)
-[![discord.py](https://img.shields.io/badge/discord.py-5865F2?style=flat-square&logo=discord&logoColor=white)](.)
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](.)
-[![XTTS v2](https://img.shields.io/badge/XTTS_v2-zero--shot-00B4D8?style=flat-square)](.)
-
-</div>
+![Python](https://img.shields.io/badge/Python-discord.py_2.4-3776AB) ![TTS](https://img.shields.io/badge/TTS-Edge_TTS%20%7C%20XTTS_v2-orange) ![GPU](https://img.shields.io/badge/Voice_Cloning-Kaggle_T4_%2B_FastAPI_%2B_ngrok-76B900) ![DB](https://img.shields.io/badge/SQLite-WAL-blue)
 
 ---
 
-텍스트를 입력하면 내 목소리로 Discord 음성 채널에서 대신 발화해주는 AI TTS 봇입니다.
-
-단순 TTS에 그치지 않고, **사용자마다 다른 목소리**로 발화하면서 **여러 명이 동시에 요청해도 충돌 없이 순서대로 재생**되어야 한다는 두 가지 요구사항에서 시작했습니다.
-
-음성 복제는 등록 시간이 길수록 품질이 좋지만, 사용자 입장에서 30분 강제 녹음은 포기 트리거입니다. **3단계 등록 구조**로 사용자 선택권을 줍니다.
-
-| Tier | 등록 시간 | 품질 | 사용자 비중 (가설) |
-|---|---|---|---|
-| **1 · Instant** | 6초 | 70% | 80% (기본) |
-| **2 · Enhanced** | 1~3분 | 80% | 15% (선택) |
-| **3 · Pro** | 30분 + 학습 2~4h | 95%+ | 5% (본인·데모) |
-
-자세한 설계는 [`TIER_DESIGN.md`](./TIER_DESIGN.md).
-
----
-
-## 어떻게 동작하나요
+## 🏗 아키텍처 & 기술 스택
 
 ```
-/say 텍스트 입력
-      │
-      ▼
-asyncio.Queue 등록    ← 동시 요청 충돌 방지
-      │
-      ▼
-Queue Worker (순차 처리)
-  ├─ SQLite에서 사용자 설정 조회 (목소리·언어·속도)
-  ├─ Kaggle TTS 서버로 HTTP 요청
-  │     └─ XTTS v2로 음성 합성 (zero-shot 복제)
-  ├─ WAV 수신 → 임시 파일 저장
-  ├─ Discord 음성 채널 재생
-  └─ 임시 파일 삭제
+Discord ── 슬래시 커맨드 12종 (/say /join /voice clone …)
+   ▼
+discord.py 2.4 봇 (Cog 구조, DI 조립)
+   ├── commands/  voice · info · settings (3개 Cog)
+   ├── services/  QueueManager(길드별 asyncio 큐) · VoiceRouter · Playback(FFmpeg)
+   ├── providers/ TTSProvider 인터페이스
+   │      ├── EdgeTTSProvider (ko-KR Neural 3종, 속도 4단계)
+   │      └── ClonedVoiceProvider ──HTTP──▶ Kaggle T4: XTTS v2 + FastAPI + ngrok
+   ├── db/ SQLite (WAL) ── user_settings · play_log
+   └── watchdog.py ── 자동 재시작 + Discord 웹훅 크래시 알림
 ```
 
-**왜 asyncio.Queue인가**
+**기술 선택 이유**
 
-여러 유저가 동시에 `/say`를 입력하면 음성이 겹쳐서 재생됩니다. Queue에 순서대로 쌓고 Worker가 하나씩 처리해서 충돌을 막았습니다.
+- **Provider 추상화**: TTS 엔진을 인터페이스 뒤로 숨겨 Edge TTS ↔ 음성 클로닝을 사용자 설정 한 줄로 전환
+- **Kaggle + ngrok**: GPU 비용 0원으로 XTTS v2 음성 클로닝 서버 운영 — 무료 인프라 조합 설계
+- **SQLite WAL**: 별도 DB 서버 없이 동시 읽기/쓰기 성능 확보, `ON CONFLICT DO UPDATE` upsert로 설정 영속화
+- **asyncio.Queue 길드별 분리**: 서버 간 재생이 서로를 막지 않는 동시성 구조
 
-**왜 Kaggle GPU인가**
+## ⭐ 핵심 기여 및 성과 (STAR)
 
-XTTS v2는 GPU 없이 실행하면 합성이 너무 느립니다. Kaggle T4 GPU를 무료로 활용하고 pyngrok으로 외부에서 접근 가능하게 했습니다.
+### 1. 개인 음성 클로닝 파이프라인 — GPU 비용 ₩0
+- **Task**: 내 목소리로 말하는 봇을 만들고 싶지만 GPU 서버 비용이 부담
+- **Action**: Kaggle Notebook(T4)에서 **XTTS v2 + FastAPI + ngrok 터널**로 합성 서버 구성, 봇은 `POST /synthesize`(timeout 120s) HTTP 클라이언트로 호출. 음성 샘플 1개(wav)로 화자 클로닝
+- **Result**: **월 0원**으로 개인 음성 TTS 운영, `/voice clone` 커맨드로 사용자별 on/off
 
----
+### 2. 길드별 비동기 재생 큐 + 자동 퇴장
+- **Task**: 여러 서버·여러 사용자의 동시 요청이 재생을 충돌시키는 문제
+- **Action**: 길드마다 독립 `asyncio.Queue` + worker task, 재생 후 임시 mp3 정리, 큐 소진 **60초 후 자동 퇴장**(idle timeout)
+- **Result**: 서버 간 간섭 없는 동시 재생 + 음성 채널 점유 리소스 자동 회수
 
-## 폴더 구조
+### 3. 무인 운영을 위한 Watchdog 설계
+- **Task**: 봇 크래시 시 수동 재시작 전까지 서비스 중단
+- **Action**: 비정상 종료 감지 → **10초 후 자동 재시작**, 30초 내 재크래시를 "빠른 크래시"로 판정해 **5회 연속 시 중단**(무한 루프 방지), Discord 웹훅으로 크래시/재시작 실시간 알림
+- **Result**: 무인 상태에서도 자가 복구되는 운영 체계 + 장애 즉시 인지
 
-```
-VoiceBridge/
-├── main.py                        # 봇 진입점, 의존성 주입
-├── config.py
-├── kaggle_tts_server.py           # Kaggle용 XTTS v2 FastAPI 서버
-├── commands/
-│   ├── voice_commands.py          # /join /leave /say /stop
-│   ├── info_commands.py           # /ping /queue
-│   └── settings_commands.py      # /setvoice /setlang
-├── services/
-│   ├── queue_manager.py           # asyncio.Queue 기반 큐 관리
-│   ├── voice_router.py            # TTS 프로바이더 라우팅
-│   ├── playback_service.py        # Discord 음성 재생
-│   └── user_settings_service.py
-├── providers/
-│   ├── base.py                    # TTSProvider 인터페이스
-│   ├── edge_tts_provider.py
-│   └── cloned_voice_provider.py   # XTTS v2
-├── db/
-│   └── database.py
-└── requirements.txt
-```
+### 4. 사용자별 설정 영속화
+- **Action**: SQLite `user_settings`(PK: user_id+guild_id) upsert로 음성(3종)·속도(4단계)·클로닝 사용 여부 저장, `play_log`로 최근 10건 `/history` 제공
+- **Result**: 재시작 후에도 유지되는 **개인화된 TTS 경험**
 
----
+## 🔧 Troubleshooting
 
-## 설치 및 실행
+**1. Windows에서 FFmpeg를 못 찾아 재생 실패**
+- 원인: winget 설치 시 PATH 미등록 환경 존재
+- 해결: `config.py`가 PATH 실패 시 **winget 패키지 경로를 glob으로 직접 탐색**하는 fallback 구현 → 설치 방식과 무관하게 동작
+
+**2. 자동 퇴장 타이머 레이스 컨디션**
+- 원인: disconnect 후 잠들어 있던 idle 타이머가 깨어나 이미 끊긴 연결을 다시 조작
+- 해결: **"타이머 취소를 disconnect보다 먼저"** 하는 순서 보장 + `cancel_idle`/`start_idle_timer` 분리 설계로 상태 전이를 명시화
+
+## 🚀 Quick Start
 
 ```bash
 pip install -r requirements.txt
-winget install ffmpeg
-cp .env.example .env
-# .env에 DISCORD_BOT_TOKEN, TTS_SERVER_URL 입력
-python main.py
+winget install ffmpeg          # Windows
+cp .env.example .env           # DISCORD_TOKEN 등 설정
+python main.py                 # 또는 python watchdog.py (자동 재시작 모드)
 ```
 
-Kaggle TTS 서버는 `kaggle_tts_server.py`를 Notebook 셀에 순서대로 실행하면 됩니다. 생성된 ngrok URL을 `.env`의 `TTS_SERVER_URL`에 입력하세요.
-
----
-
-## 슬래시 커맨드
-
-| 커맨드 | 설명 |
+| 커맨드 | 기능 |
 |---|---|
-| `/join` | 음성 채널 입장 |
-| `/leave` | 퇴장 + 큐 초기화 |
-| `/say text:...` | TTS 재생 (현재 등록된 tier로) |
-| `/stop` | 재생 중단 |
-| `/queue` | 대기열 확인 |
-| `/setvoice` | **Tier 1** — 6초 음성 등록 (즉시 사용) |
-| `/setvoice enhanced` | **Tier 2** — 15문장 다중 샘플 등록 (1~3분) |
-| `/setvoice pro` | **Tier 3** — 30분 fine-tune 신청 (2~4시간 학습) |
-
----
-
-## 기술스택
-
-| | |
-|---|---|
-| Discord Bot | discord.py |
-| TTS 모델 | XTTS v2 (Coqui TTS, zero-shot 복제) |
-| TTS 서버 | FastAPI + uvicorn |
-| 터널링 | pyngrok (Kaggle → 외부 URL) |
-| 비동기 처리 | Python asyncio.Queue |
-| DB | SQLite (사용자 설정) |
-| GPU | Kaggle T4 |
+| `/join` `/leave` | 음성 채널 입·퇴장 |
+| `/say <text>` | TTS 재생 (최대 200자) |
+| `/queue` `/stop` `/history` | 큐 확인 · 중지 · 최근 기록 |
+| `/voice set\|speed\|clone\|show\|reset` | 목소리 · 속도 · 클로닝 설정 |
